@@ -237,6 +237,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 	case WM_CREATE:
+		// 表示するイメージをマップに格納
+		InitializeImageMap();
+
+		// KinectSignを受信するためのソケット生成
+		g_i4c3dSocket = new I4C3DSocketCommunication(hWnd);
+
 		// 子ウィンドウ作成
 		MyRegisterClass(ChildWndProc, CHILD_WINDOW, CreateSolidBrush(TRANSPARENT_COLOR));
 		hWndChild = CreateWindowEx(
@@ -256,12 +262,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		SetLayeredWindowAttributes(hWndChild, TRANSPARENT_COLOR, 0, LWA_COLORKEY);
 		ShowWindow(hWndChild, SW_SHOW);
 		UpdateWindow(hWndChild);
-
-		// 表示するイメージをマップに格納
-		InitializeImageMap();
-
-		// KinectSignを受信するためのソケット生成
-		g_i4c3dSocket = new I4C3DSocketCommunication(hWnd);
 		break;
 
 	case WM_MOVE:
@@ -378,8 +378,8 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 			HDC hdc = BeginPaint(hWnd, &ps);
 			FillRect(hdc, &rect, CreateSolidBrush(TRANSPARENT_COLOR));
 			Gdiplus::Graphics g(hdc);
+			OutputDebugString(g_ImageMap[g_i4c3dCommand]);
 			Gdiplus::Image *img = new Gdiplus::Image(g_ImageMap[g_i4c3dCommand]);
-			UINT width = img->GetWidth();
 			g.DrawImage(img, rect.left, rect.top, rect.right, rect.bottom);
 			EndPaint(hWnd, &ps);
 			delete img;
