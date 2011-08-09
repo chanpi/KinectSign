@@ -28,7 +28,15 @@
 #define PARENT_WINDOW		_T("PartTransparent")
 #define CHILD_WINDOW		_T("PartTransparentChild")
 #define TRANSPARENT_COLOR	RGB(255, 255, 255)	// 白
-//#define TRANSPARENT_COLOR	RGB(1, 2, 3)
+#define WINDOW_SIZE			150
+
+static const char* KINECT_ZOOMIN	= "kinect zoomin";
+static const char* KINECT_ZOOMOUT	= "kinect zoomout";
+static const char* KINECT_UP		= "kinect up";
+static const char* KINECT_DOWN		= "kinect down";
+static const char* KINECT_LEFT		= "kinect left";
+static const char* KINECT_RIGHT		= "kinect right";
+static const char* KINECT_STOP		= "kinect stop";
 
 // グローバル変数:
 HINSTANCE hInst;								// 現在のインターフェイス
@@ -42,9 +50,12 @@ typedef enum {
 	TUMBLE_DOWN,
 	TUMBLE_LEFT,
 	TUMBLE_RIGHT,
+	COMMAND_STOP,
 } I4C3D_COMMAND;
 
-static std::map<I4C3D_COMMAND, TCHAR*> g_ImageMap;
+static std::map<I4C3D_COMMAND, const wchar_t*> g_ImageMap;
+static I4C3D_COMMAND g_i4c3dCommand					= COMMAND_STOP;
+static I4C3DSocketCommunication* g_i4c3dSocket		= NULL;
 
 
 // このコード モジュールに含まれる関数の宣言を転送します:
@@ -53,6 +64,7 @@ BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK	ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
+void				InitializeImageMap(void);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
@@ -113,9 +125,15 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	return (int) msg.wParam;
 }
 
-void InitializeImageMap()
+void InitializeImageMap(void)
 {
-
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(DOLLY_ZOOMIN, _T("Image/zoomin.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(DOLLY_ZOOMOUT, _T("Image/zoomout.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(TUMBLE_UP, _T("Image/up.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(TUMBLE_DOWN, _T("Image/down.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(TUMBLE_LEFT, _T("Image/left.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(TUMBLE_RIGHT, _T("Image/right.png")) );
+	g_ImageMap.insert( std::map<I4C3D_COMMAND, const wchar_t*>::value_type(COMMAND_STOP, _T("Image/stop.png")) );
 }
 
 //
@@ -169,7 +187,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // グローバル変数にインスタンス処理を格納します。
 
    hWnd = CreateWindowEx(
-	   WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+	   WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
 	   PARENT_WINDOW,
 	   PARENT_WINDOW,
 	   WS_POPUP | WS_VISIBLE,
@@ -187,7 +205,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
-   MoveWindow(hWnd, 100, 100, 200, 200, TRUE);
+   RECT desktop;
+   SystemParametersInfo(SPI_GETWORKAREA, 0, &desktop, 0);
+
+   MoveWindow(hWnd, 0, desktop.bottom-WINDOW_SIZE, WINDOW_SIZE, WINDOW_SIZE, TRUE);
    SetLayeredWindowAttributes(hWnd, 0, 196, LWA_ALPHA);
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -231,13 +252,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			NULL,
 			(HINSTANCE) GetModuleHandle(NULL),
 			NULL);
-		//MoveWindow(hWndChild, 150, 150, 100, 100, TRUE);
-		MoveWindow(hWndChild, 100, 100, 200, 200, TRUE);
+		MoveWindow(hWndChild, 0, 0, WINDOW_SIZE, WINDOW_SIZE, TRUE);
 		SetLayeredWindowAttributes(hWndChild, TRANSPARENT_COLOR, 0, LWA_COLORKEY);
 		ShowWindow(hWndChild, SW_SHOW);
 		UpdateWindow(hWndChild);
 
-		
+		// 表示するイメージをマップに格納
+		InitializeImageMap();
+
+		// KinectSignを受信するためのソケット生成
+		g_i4c3dSocket = new I4C3DSocketCommunication(hWnd);
 		break;
 
 	case WM_MOVE:
@@ -245,10 +269,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		if (hWndChild != NULL) {
 			RECT rect;
 			GetWindowRect(hWnd, &rect);
-			rect.left	+= 50;
-			rect.top	+= 50;
-			rect.right	-= 50;
-			rect.bottom	-= 50;
+			rect.left	+= 1;
+			rect.top	+= 1;
+			rect.right	-= 1;
+			rect.bottom	-= 1;
 			MoveWindow(hWndChild, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 		}
 		break;
@@ -260,10 +284,51 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_RBUTTONDOWN:
 		// 右クリックで終了
-		PostQuitMessage(0);
+		DestroyWindow(hWnd);
 		break;
 
-	case MY_KINECTNOTIFY:
+	case WSOCK_SELECT:
+		{
+			char buf[32] = {0};
+			switch (WSAGETSELECTEVENT(lParam)) {
+			case FD_READ:
+				if (recv(g_i4c3dSocket->m_socketHandler, buf, sizeof(buf), 0) <= 0) {
+					g_i4c3dCommand = COMMAND_STOP;
+
+				} else {
+					if (!_stricmp(buf, KINECT_ZOOMIN))
+					{
+						g_i4c3dCommand = DOLLY_ZOOMIN;
+					}
+					else if (!_stricmp(buf, KINECT_ZOOMOUT))
+					{
+						g_i4c3dCommand = DOLLY_ZOOMOUT;
+					}
+					else if (!_stricmp(buf, KINECT_UP))
+					{
+						g_i4c3dCommand = TUMBLE_UP;
+					}
+					else if (!_stricmp(buf, KINECT_DOWN))
+					{
+						g_i4c3dCommand = TUMBLE_DOWN;
+					}
+					else if (!_stricmp(buf, KINECT_LEFT))
+					{
+						g_i4c3dCommand = TUMBLE_LEFT;
+					}
+					else if (!_stricmp(buf, KINECT_RIGHT))
+					{
+						g_i4c3dCommand = TUMBLE_RIGHT;
+					}
+					else if (!_stricmp(buf, KINECT_STOP))
+					{
+						g_i4c3dCommand = COMMAND_STOP;
+					}
+				}
+				InvalidateRect(hWndChild, NULL, TRUE);
+				break;
+			}
+		}
 		break;
 
 	//case WM_COMMAND:
@@ -289,6 +354,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	//	break;
 	case WM_DESTROY:
 		PostQuitMessage(0);
+		if (g_i4c3dSocket != NULL) {
+			delete g_i4c3dSocket;
+			g_i4c3dSocket = NULL;
+		}
 		break;
 	default:
 		return DefWindowProc(hWnd, message, wParam, lParam);
@@ -309,7 +378,7 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 			HDC hdc = BeginPaint(hWnd, &ps);
 			FillRect(hdc, &rect, CreateSolidBrush(TRANSPARENT_COLOR));
 			Gdiplus::Graphics g(hdc);
-			Gdiplus::Image *img = new Gdiplus::Image(_T("image.png"));
+			Gdiplus::Image *img = new Gdiplus::Image(g_ImageMap[g_i4c3dCommand]);
 			UINT width = img->GetWidth();
 			g.DrawImage(img, rect.left, rect.top, rect.right, rect.bottom);
 			EndPaint(hWnd, &ps);
